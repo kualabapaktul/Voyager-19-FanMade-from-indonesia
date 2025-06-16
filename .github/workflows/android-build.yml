@@ -1,1 +1,85 @@
+name: Build Android APK
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y unzip wget
+
+    - name: Download Godot Headless
+      env:
+        GODOT_VER: 4.2.1
+      run: |
+        wget "https://downloads.tuxfamily.org/godotengine/${GODOT_VER}/Godot_v${GODOT_VER}-stable_linux_headless.x86_64.zip" -O godot.zip
+        unzip godot.zip -d godot
+        chmod +x godot/Godot_v${GODOT_VER}-stable_linux_headless.x86_64
+
+    - name: Set up Android SDK
+      env:
+        ANDROID_SDK_ROOT: ${{ runner.workspace }}/android-sdk
+      run: |
+        mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline.zip
+        unzip cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+        mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+    - name: Create debug keystore
+      run: |
+        if [ ! -f debug.keystore ]; then
+          keytool -genkeypair -v -keystore debug.keystore -alias voyager \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Voyager-19 (Kreasi anak indonesia), OU=Dev, O=Voyager-19, L=Jakarta, S=DKI Jakarta, C=ID"
+        fi
+
+    - name: Write export_presets.cfg
+      run: |
+        cat > export_presets.cfg <<EOF
+[config]
+
+[export]
+export_filter=*
+compatible_platforms=Android
+release=0
+
+[export.local_debug]
+name="Android"
+export_path="Voyager-19.apk"
+add_resources=0
+custom_template/debug_template=true
+compression=Zip
+sign/keystore_path="debug.keystore"
+sign/keystore_password="android"
+sign/key_alias="voyager"
+sign/key_password="android"
+EOF
+
+    - name: Export APK
+      run: |
+        ./godot/Godot_v4.2.1-stable_linux_headless.x86_64 --export "Android" "Voyager-19.apk"
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: voyager-android-apk
+        path: Voyager-19.apk
+        
